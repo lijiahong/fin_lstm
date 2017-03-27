@@ -5,30 +5,42 @@ from __future__ import print_function
 import time
 import warnings
 import numpy as np
+import pandas as pd
 import time
-#import matplotlib.pyplot as plt
 from numpy import newaxis
 from keras.layers.core import Dense, Activation, Dropout
 from keras.layers.recurrent import LSTM
+from keras.layers import Merge
 from keras.models import Sequential
 
 warnings.filterwarnings("ignore")
 
+def check_direction(predict,y_test):
+    pre_seri = pd.Series(predict)
+    real_seri = pd.Series(y_test)
+    pre_var = pre_seri - pre_seri.shift(1)
+    real_var = real_seri - real_seri.shift(1)
+    correct = sum([ pre_var[i]*real_var[i] > 0 for i in range(1,len(pre_var))])
+    rate = correct * 1.0 / (len(real_var) - 1)
+    print('correct:', rate)
+    return rate
+
 def load_data(filename, seq_len, normalise_window):
-    f = open(filename, 'rb').read()
-    data = f.split('\n')
+    price_data = pd.read_csv(filename, index_col=0, header=0, sep=',', parse_dates=True)
+    data = list(price_data['close'])
     #print('data',data)
     #print('data len:',len(data))
     #print('sequence len:',seq_len)
 
     sequence_length = seq_len + 1
     result = []
-    for index in range(len(data) - sequence_length):
+    for index in range(len(data) - sequence_length +1):
+        #print(index, index+sequence_length)
         result.append(data[index: index + sequence_length])  #得到长度为seq_len+1的向量，最后一个作为label
 
-    #print('result len:',len(result))
-    #print('result shape:',np.array(result).shape)
-    #print(result[:1])
+    print('result len:',len(result))
+    print('result shape:',np.array(result).shape)
+    print(len(result[-1]))
 
     if normalise_window:
         result = normalise_windows(result)
@@ -50,7 +62,6 @@ def load_data(filename, seq_len, normalise_window):
     x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], 1))  
 
     return [x_train, y_train, x_test, y_test]
-
 def normalise_windows(window_data):
     normalised_data = []
     for window in window_data:   #window shape (sequence_length L ,)  即(51L,)
@@ -59,14 +70,24 @@ def normalise_windows(window_data):
     return normalised_data
 
 def build_model(layers):  #layers [1,50,100,1]
+
+    model1 = Sequential()
+    model1.add(LSTM(input_dim=layers[0],output_dim=layers[1],return_sequences=True))
+    model1.add(Dropout(0.2))
+
+    model1.add(LSTM(layers[2],return_sequences=False))
+    model1.add(Dropout(0.2))
+    
+    model2 = Sequential()
+    model2.add(LSTM(input_dim=layers[0],output_dim=layers[1],return_sequences=True))
+    model2.add(Dropout(0.2))
+
+    model2.add(LSTM(layers[2],return_sequences=False))
+    model2.add(Dropout(0.2))
+    
+
     model = Sequential()
-
-    model.add(LSTM(input_dim=layers[0],output_dim=layers[1],return_sequences=True))
-    model.add(Dropout(0.2))
-
-    model.add(LSTM(layers[2],return_sequences=False))
-    model.add(Dropout(0.2))
-
+    model.add(Merge([model1, model2], mode='concat'))
     model.add(Dense(output_dim=layers[3]))
     model.add(Activation("linear"))
 
@@ -105,38 +126,15 @@ def predict_sequences_multiple(model, data, window_size, prediction_len):  #wind
         prediction_seqs.append(predicted)
     return prediction_seqs
 
-'''
-def plot_results(predicted_data, true_data, filename):
-    fig = plt.figure(facecolor='white')
-    ax = fig.add_subplot(111)
-    ax.plot(true_data, label='True Data')
-    plt.plot(predicted_data, label='Prediction')
-    plt.legend()
-    plt.show()
-    plt.savefig(filename+'.png')
-
-def plot_results_multiple(predicted_data, true_data, prediction_len):
-    fig = plt.figure(facecolor='white')
-    ax = fig.add_subplot(111)
-    ax.plot(true_data, label='True Data')
-    #Pad the list of predictions to shift it in the graph to it's correct start
-    for i, data in enumerate(predicted_data):
-        padding = [None for p in xrange(i * prediction_len)]
-        plt.plot(padding + data, label='Prediction')
-        plt.legend()
-    plt.show()
-    plt.savefig('plot_results_multiple.png')
-'''
 
 if __name__=='__main__':
     global_start_time = time.time()
-    epochs  = 1
+    epochs  = 2
     seq_len = 50
 
     print('> Loading data... ')
 
-    X_train, y_train, X_test, y_test = load_data('sp500.csv', seq_len, True)
-    
+    X_train, y_train, X_test, y_test = load_data('index/day.csv', seq_len, True)
     print('X_train shape:',X_train.shape)  #(3709L, 50L, 1L)
     print('y_train shape:',y_train.shape)  #(3709L,)
     print('X_test shape:',X_test.shape)    #(412L, 50L, 1L)
@@ -144,20 +142,15 @@ if __name__=='__main__':
 
     print('> Data Loaded. Compiling...')
     model = build_model([1, 50, 100, 1])
+    model.fit([X_train, X_train],y_train,batch_size=512,nb_epoch=epochs,validation_split=0.05)
 
-    model.fit(X_train,y_train,batch_size=512,nb_epoch=epochs,validation_split=0.05)
-
-    multiple_predictions = predict_sequences_multiple(model, X_test, seq_len, prediction_len=50)
-    print('multiple_predictions shape:',np.array(multiple_predictions).shape)   #(8L,50L)
-
-    full_predictions = predict_sequence_full(model, X_test, seq_len)
-    print('full_predictions shape:',np.array(full_predictions).shape)    #(412L,)
-
-    point_by_point_predictions = predict_point_by_point(model, X_test)
-    print('point_by_point_predictions shape:',np.array(point_by_point_predictions).shape)  #(412L)
-
-    #print('Training duration (s) : ', time.time() - global_start_time)
+    #multiple_predictions = predict_sequences_multiple(model, X_test, seq_len, prediction_len=50)
+    #print('multiple_predictions shape:',np.array(multiple_predictions).shape)   #(8L,50L)
     
-    #plot_results_multiple(multiple_predictions, y_test, 50)
-    #plot_results(full_predictions,y_test,'full_predictions')
-    #plot_results(point_by_point_predictions,y_test,'point_by_point_predictions')
+    #full_predictions = predict_sequence_full(model, X_test, seq_len)
+    #print('full_predictions shape:',np.array(full_predictions).shape)    #(412L,)
+
+    point_by_point_predictions = predict_point_by_point(model, [X_test, X_test])
+    print('point_by_point_predictions shape:',np.array(point_by_point_predictions).shape)  #(412L)
+    check_direction(point_by_point_predictions,y_test)
+    print('Training duration (s) : ', time.time() - global_start_time)
