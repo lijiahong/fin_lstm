@@ -6,7 +6,9 @@ import time
 import warnings
 import numpy as np
 import time
-#import matplotlib.pyplot as plt
+import matplotlib as mpl
+mpl.use("Agg")
+import matplotlib.pyplot as plt
 from numpy import newaxis
 from keras.layers.core import Dense, Activation, Dropout
 from keras.layers.recurrent import LSTM
@@ -105,7 +107,6 @@ def predict_sequences_multiple(model, data, window_size, prediction_len):  #wind
         prediction_seqs.append(predicted)
     return prediction_seqs
 
-'''
 def plot_results(predicted_data, true_data, filename):
     fig = plt.figure(facecolor='white')
     ax = fig.add_subplot(111)
@@ -126,7 +127,6 @@ def plot_results_multiple(predicted_data, true_data, prediction_len):
         plt.legend()
     plt.show()
     plt.savefig('plot_results_multiple.png')
-'''
 
 if __name__=='__main__':
     global_start_time = time.time()
@@ -156,8 +156,8 @@ if __name__=='__main__':
     point_by_point_predictions = predict_point_by_point(model, X_test)
     print('point_by_point_predictions shape:',np.array(point_by_point_predictions).shape)  #(412L)
 
-    #print('Training duration (s) : ', time.time() - global_start_time)
+    print('Training duration (s) : ', time.time() - global_start_time)
     
-    #plot_results_multiple(multiple_predictions, y_test, 50)
-    #plot_results(full_predictions,y_test,'full_predictions')
-    #plot_results(point_by_point_predictions,y_test,'point_by_point_predictions')
+    plot_results_multiple(multiple_predictions, y_test, 50)
+    plot_results(full_predictions,y_test,'full_predictions')
+    plot_results(point_by_point_predictions,y_test,'point_by_point_predictions')

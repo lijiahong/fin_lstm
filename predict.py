@@ -18,58 +18,90 @@ warnings.filterwarnings("ignore")
 def check_direction(predict,y_test):
     pre_seri = pd.Series(predict)
     real_seri = pd.Series(y_test)
-    pre_var = pre_seri - pre_seri.shift(1)
-    real_var = real_seri - real_seri.shift(1)
-    correct = sum([ pre_var[i]*real_var[i] > 0 for i in range(1,len(pre_var))])
-    rate = correct * 1.0 / (len(real_var) - 1)
+    correct = sum([ pre_seri[i]*real_seri[i] >= 0 for i in range(len(pre_seri))])
+    rate = correct * 1.0 / len(real_seri)
     print('correct:', rate)
     return rate
 
 def load_data(filename, seq_len, normalise_window):
     price_data = pd.read_csv(filename, index_col=0, header=0, sep=',', parse_dates=True)
-    data = list(price_data['close'])
+    close_data = list(price_data['close'])
+    bt_data = list(price_data['bs'])
     #print('data',data)
     #print('data len:',len(data))
     #print('sequence len:',seq_len)
 
     sequence_length = seq_len + 1
-    result = []
-    for index in range(len(data) - sequence_length +1):
-        #print(index, index+sequence_length)
-        result.append(data[index: index + sequence_length])  #得到长度为seq_len+1的向量，最后一个作为label
+    close_result = []
+    y_result = []
+    for index in range(len(close_data) - sequence_length + 1):
+        close_result.append(close_data[index: index + seq_len])  #得到长度为seq_len的向量，最后一个作为label
+        y_result.append(1 if (close_data[index + seq_len]-close_data[index+seq_len-1]) > 0 else -1)
 
-    print('result len:',len(result))
-    print('result shape:',np.array(result).shape)
-    print(len(result[-1]))
+    bt_result = []
+    for index in range(len(bt_data) - sequence_length +1):
+        bt_result.append(bt_data[index: index + seq_len])  #得到长度为seq_len的向量
+    print('result len:',len(close_result),len(bt_result), len(y_result))
+    print('result shape:',np.array(close_result).shape, np.array(bt_result).shape, np.array(y_result).shape)
+    print(len(close_result[-1]), len(bt_result[-1]))
 
     if normalise_window:
-        result = normalise_windows(result)
+        close_result = normalise_windows(close_result)
+        bt_result = normalise_windows(bt_result)
 
     #print(result[:1])
     #print('normalise_windows result shape:',np.array(result).shape)
 
-    result = np.array(result)
-
+    close_result = np.array(close_result)
+    bt_result = np.array(bt_result)
+    y_result = np.array(y_result)
     #划分train、test
-    row = round(0.9 * result.shape[0])
-    train = result[:row, :]
-    np.random.shuffle(train)
-    x_train = train[:, :-1]
-    y_train = train[:, -1]
-    x_test = result[row:, :-1]
-    y_test = result[row:, -1]
-    x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
-    x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], 1))  
+    row = round(0.9 * close_result.shape[0])
+    train = close_result[:row, :]
+    bt_train = bt_result[:row, :]
+    y_train = y_result[:row]
+    result = zip(train, bt_train, y_train)
+    np.random.shuffle(result)
+    train, bt_train, y_train = zip(*result)
+    train = np.array(train) 
+    x1_train = np.reshape(train, (train.shape[0], train.shape[1], 1))
+    bt_train = np.array(bt_train) 
+    x2_train = np.reshape(bt_train, (bt_train.shape[0], bt_train.shape[1], 1))
+    y_train = np.array(y_train)
+    
+    x1_test = close_result[row:, :]
+    x1_test = np.reshape(x1_test, (x1_test.shape[0], x1_test.shape[1], 1))  
+    x2_test = bt_result[row:,:]
+    x2_test = np.reshape(x2_test, (x2_test.shape[0], x2_test.shape[1], 1))  
+    y_test = y_result[row:]
 
-    return [x_train, y_train, x_test, y_test]
+    return [x1_train, x2_train, y_train, x1_test, x2_test, y_test]
+
 def normalise_windows(window_data):
     normalised_data = []
     for window in window_data:   #window shape (sequence_length L ,)  即(51L,)
-        normalised_window = [((float(p) / float(window[0])) - 1) for p in window]
+        normalised_window = [((float(p) / float(window[-1])) - 1) for p in window]
         normalised_data.append(normalised_window)
     return normalised_data
 
 def build_model(layers):  #layers [1,50,100,1]
+    model = Sequential()
+
+    model.add(LSTM(input_dim=layers[0],output_dim=layers[1],return_sequences=True))
+    model.add(Dropout(0.2))
+
+    model.add(LSTM(layers[2],return_sequences=False))
+    model.add(Dropout(0.2))
+
+    model.add(Dense(output_dim=layers[3]))
+    model.add(Activation("linear"))
+
+    start = time.time()
+    model.compile(loss="mse", optimizer="rmsprop")
+    print("Compilation Time : ", time.time() - start)
+    return model
+
+def build_two_model(layers):  #layers [1,50,100,1]
 
     model1 = Sequential()
     model1.add(LSTM(input_dim=layers[0],output_dim=layers[1],return_sequences=True))
@@ -129,20 +161,25 @@ def predict_sequences_multiple(model, data, window_size, prediction_len):  #wind
 
 if __name__=='__main__':
     global_start_time = time.time()
-    epochs  = 2
+    epochs  = 3
     seq_len = 50
 
     print('> Loading data... ')
 
-    X_train, y_train, X_test, y_test = load_data('index/day.csv', seq_len, True)
-    print('X_train shape:',X_train.shape)  #(3709L, 50L, 1L)
+    x1_train, x2_train, y_train, x1_test, x2_test, y_test = load_data('sentiment/daywithprice.csv', seq_len, True)
+    '''
+    print('x1_train shape:',x1_train.shape)  #(3709L, 50L, 1L)
+    print('x2_train shape:',x2_train.shape)  #(3709L, 50L, 1L)
     print('y_train shape:',y_train.shape)  #(3709L,)
-    print('X_test shape:',X_test.shape)    #(412L, 50L, 1L)
+    print('x1_test shape:',x1_test.shape)    #(412L, 50L, 1L)
+    print('x1_test shape:',x2_test.shape)    #(412L, 50L, 1L)
     print('y_test shape:',y_test.shape)    #(412L,)
-
+    '''
     print('> Data Loaded. Compiling...')
-    model = build_model([1, 50, 100, 1])
-    model.fit([X_train, X_train],y_train,batch_size=512,nb_epoch=epochs,validation_split=0.05)
+    model1 = build_model([1, 50, 100, 1])
+    model2 = build_two_model([1, 50, 100, 1])
+    model1.fit(x1_train,y_train,batch_size=512,nb_epoch=epochs,validation_split=0.05)
+    model2.fit([x1_train, x2_train],y_train,batch_size=512,nb_epoch=epochs,validation_split=0.05)
 
     #multiple_predictions = predict_sequences_multiple(model, X_test, seq_len, prediction_len=50)
     #print('multiple_predictions shape:',np.array(multiple_predictions).shape)   #(8L,50L)
@@ -150,7 +187,12 @@ if __name__=='__main__':
     #full_predictions = predict_sequence_full(model, X_test, seq_len)
     #print('full_predictions shape:',np.array(full_predictions).shape)    #(412L,)
 
-    point_by_point_predictions = predict_point_by_point(model, [X_test, X_test])
-    print('point_by_point_predictions shape:',np.array(point_by_point_predictions).shape)  #(412L)
-    check_direction(point_by_point_predictions,y_test)
+    point_by_point_predictions_1 = predict_point_by_point(model1, x1_test)
+    print('point_by_point_predictions shape:',np.array(point_by_point_predictions_1).shape)  #(412L)
+    check_direction(point_by_point_predictions_1,y_test)
+    print('Training duration (s) : ', time.time() - global_start_time)
+    
+    point_by_point_predictions_2 = predict_point_by_point(model2, [x1_test, x2_test])
+    print('point_by_point_predictions shape:',np.array(point_by_point_predictions_2).shape)  #(412L)
+    check_direction(point_by_point_predictions_2,y_test)
     print('Training duration (s) : ', time.time() - global_start_time)
