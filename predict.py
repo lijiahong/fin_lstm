@@ -86,6 +86,7 @@ def normalise_windows(window_data):
     normalised_data = []
     for window in window_data:   #window shape (sequence_length L ,)  即(51L,)
         normalised_window = [((float(p) / float(window[-1])) - 1) for p in window]
+        #normalised_window = [((float(p) - np.mean(window)) / np.std(window)) for p in window]
         normalised_data.append(normalised_window)
     return normalised_data
 
@@ -159,7 +160,7 @@ def predict_sequences_multiple(model, data, window_size, prediction_len):  #wind
 
 if __name__=='__main__':
     global_start_time = time.time()
-    epochs  = 5
+    epochs  = 15
     seq_len = 30
     batch = 64
 
