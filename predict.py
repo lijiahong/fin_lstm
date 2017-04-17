@@ -110,11 +110,11 @@ def build_model(layers):  #layers [1,50,100,1]
 def build_two_model(layers):  #layers [1,50,100,1]
 
     model1 = Sequential()
-    model1.add(LSTM(input_dim=layers[0],output_dim=layers[1],return_sequences=False))
+    model1.add(LSTM(layers[1],return_sequences=False, input_shape=(seq_len,1)))
     model1.add(Dropout(0.2))
 
     model2 = Sequential()
-    model2.add(LSTM(input_dim=layers[0],output_dim=layers[1],return_sequences=False))
+    model2.add(LSTM(layers[1],return_sequences=False, input_shape=(seq_len,1)))
     model2.add(Dropout(0.2))
 
     model = Sequential()
@@ -161,7 +161,7 @@ def predict_sequences_multiple(model, data, window_size, prediction_len):  #wind
 if __name__=='__main__':
     global_start_time = time.time()
     epochs  = 15
-    seq_len = 30
+    seq_len = 10
     batch = 64
 
     print('> Loading data... ')
@@ -183,7 +183,7 @@ if __name__=='__main__':
     #check_direction(point_by_point_predictions_1,y_test)
     #print('Training duration (s) : ', time.time() - global_start_time)
     '''
-    model2 = build_two_model([1, seq_len, 2*seq_len, 1])
+    model2 = build_two_model([1, 2*seq_len, 2*seq_len, 1])
     model2.fit([x1_train, x2_train],y_train,batch_size=batch,nb_epoch=epochs,validation_split=0.05)
 
     point_by_point_predictions_2 = predict_point_by_point(model2, [x1_test, x2_test])
