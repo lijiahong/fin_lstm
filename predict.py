@@ -27,7 +27,8 @@ def check_direction(predict,y_test):
 def load_data(filename, seq_len, normalise_window):
     price_data = pd.read_csv(filename, index_col=0, header=0, sep=',', parse_dates=True)
     close_data = list(price_data['open'])
-    bt_data = list(price_data['bz'])
+    bt_data = list(price_data['bt'])
+    vo_data = list(price_data['volume'])
     #print('data',data)
     #print('data len:',len(data))
     #print('sequence len:',seq_len)
@@ -42,6 +43,10 @@ def load_data(filename, seq_len, normalise_window):
     bt_result = []
     for index in range(len(bt_data) - sequence_length +1):
         bt_result.append(bt_data[index: index + seq_len])  #得到长度为seq_len的向量
+    vo_result = []
+    for index in range(len(vo_data) - sequence_length +1):
+        vo_result.append(vo_data[index: index + seq_len])  #得到长度为seq_len的向量
+
     print('result len:',len(close_result),len(bt_result), len(y_result))
     print('result shape:',np.array(close_result).shape, np.array(bt_result).shape, np.array(y_result).shape)
     print(len(close_result[-1]), len(bt_result[-1]))
@@ -49,25 +54,31 @@ def load_data(filename, seq_len, normalise_window):
     if normalise_window:
         close_result = normalise_windows(close_result)
         bt_result = normalise_windows(bt_result)
-
+        vo_result = normalise_windows(vo_result)
     #print(result[:1])
     #print('normalise_windows result shape:',np.array(result).shape)
 
     close_result = np.array(close_result)
     bt_result = np.array(bt_result)
+    vo_result = np.array(vo_result)
     y_result = np.array(y_result)
     #划分train、test
     row = round(0.9 * close_result.shape[0])
     train = close_result[:row, :]
     bt_train = bt_result[:row, :]
+    vo_train = vo_result[:row, :]
     y_train = y_result[:row]
-    result = zip(train, bt_train, y_train)
+
+    result = zip(train, bt_train, vo_train, y_train)
     np.random.shuffle(result)
-    train, bt_train, y_train = zip(*result)
+    train, bt_train, vo_train, y_train = zip(*result)
+
     train = np.array(train) 
     x1_train = np.reshape(train, (train.shape[0], train.shape[1], 1))
     bt_train = np.array(bt_train) 
     x2_train = np.reshape(bt_train, (bt_train.shape[0], bt_train.shape[1], 1))
+    vo_train = np.array(vo_train) 
+    x3_train = np.reshape(vo_train, (vo_train.shape[0], vo_train.shape[1], 1))
     y_train = np.array(y_train)
     #y_train = y_train.astype(int)
     y_train = to_categorical(y_train)
@@ -76,11 +87,13 @@ def load_data(filename, seq_len, normalise_window):
     x1_test = np.reshape(x1_test, (x1_test.shape[0], x1_test.shape[1], 1))  
     x2_test = bt_result[row:,:]
     x2_test = np.reshape(x2_test, (x2_test.shape[0], x2_test.shape[1], 1))  
+    x3_test = vo_result[row:,:]
+    x3_test = np.reshape(x3_test, (x3_test.shape[0], x3_test.shape[1], 1))  
     y_test = y_result[row:]
     #y_test = y_test.astype(int)
     y_test = to_categorical(y_test)
 
-    return [x1_train, x2_train, y_train, x1_test, x2_test, y_test]
+    return [x1_train, x2_train, x3_train, y_train, x1_test, x2_test, x3_test, y_test]
 
 def normalise_windows(window_data):
     normalised_data = []
@@ -127,6 +140,30 @@ def build_two_model(layers):  #layers [1,50,100,1]
     print("Compilation Time : ", time.time() - start)
     return model
 
+def build_three_model(layers):  #layers [1,50,100,1]
+
+    model1 = Sequential()
+    model1.add(LSTM(layers[1],return_sequences=False, input_shape=(seq_len,1)))
+    model1.add(Dropout(0.2))
+
+    model2 = Sequential()
+    model2.add(LSTM(layers[1],return_sequences=False, input_shape=(seq_len,1)))
+    model2.add(Dropout(0.2))
+
+    model3 = Sequential()
+    model3.add(LSTM(layers[1],return_sequences=False, input_shape=(seq_len,1)))
+    model3.add(Dropout(0.2))
+
+    model = Sequential()
+    model.add(Merge([model1, model2, model3], mode='concat'))
+    model.add(Dense(layers[2],activation='relu'))
+    model.add(Dense(layers[3],activation='softmax'))
+
+    start = time.time()
+    model.compile(loss="categorical_crossentropy", optimizer="rmsprop",metrics=['categorical_accuracy'])
+    print("Compilation Time : ", time.time() - start)
+    return model
+
 #直接全部预测
 def predict_point_by_point(model, data):
     predicted = model.predict(data)
@@ -166,12 +203,14 @@ if __name__=='__main__':
 
     print('> Loading data... ')
 
-    x1_train, x2_train, y_train, x1_test, x2_test, y_test = load_data('sentiment/daywithprice.csv', seq_len, True)
+    x1_train, x2_train, x3_train, y_train, x1_test, x2_test, x3_test, y_test = load_data('sentiment/daywithprice.csv', seq_len, True)
     print('x1_train shape:',x1_train.shape)  #(3709L, 50L, 1L)
     print('x2_train shape:',x2_train.shape)  #(3709L, 50L, 1L)
+    print('x3_train shape:',x3_train.shape)  #(3709L, 50L, 1L)
     print('y_train shape:',y_train.shape)  #(3709L,)
     print('x1_test shape:',x1_test.shape)    #(412L, 50L, 1L)
-    print('x1_test shape:',x2_test.shape)    #(412L, 50L, 1L)
+    print('x2_test shape:',x2_test.shape)    #(412L, 50L, 1L)
+    print('x3_test shape:',x3_test.shape)    #(412L, 50L, 1L)
     print('y_test shape:',y_test.shape)    #(412L,)
     print('> Data Loaded. Compiling...')
    
@@ -183,13 +222,20 @@ if __name__=='__main__':
     #check_direction(point_by_point_predictions_1,y_test)
     #print('Training duration (s) : ', time.time() - global_start_time)
     '''
-    model2 = build_two_model([1, 2*seq_len, 2*seq_len, 1])
-    model2.fit([x1_train, x2_train],y_train,batch_size=batch,nb_epoch=epochs,validation_split=0.05)
-
-    point_by_point_predictions_2 = predict_point_by_point(model2, [x1_test, x2_test])
-    print('point_by_point_predictions shape:',np.array(point_by_point_predictions_2).shape)  #(412L)
-    check_direction(point_by_point_predictions_2,y_test)
+    #model2 = build_two_model([1, 2*seq_len, 2*seq_len, 1])
+    #model2.fit([x1_train, x2_train],y_train,batch_size=batch,nb_epoch=epochs,validation_split=0.05)
+    #point_by_point_predictions_2 = predict_point_by_point(model3, [x1_test, x2_test])
+    #print('point_by_point_predictions shape:',np.array(point_by_point_predictions_2).shape)  #(412L)
+    #check_direction(point_by_point_predictions_2,y_test)
     #print('Training duration (s) : ', time.time() - global_start_time)
+    
+    model3 = build_three_model([1, 3*seq_len, 3*seq_len, 2])
+    model3.fit([x1_train, x2_train, x3_train],y_train,batch_size=batch,nb_epoch=epochs,validation_split=0.05)
+    point_by_point_predictions_3 = predict_point_by_point(model3, [x1_test, x2_test, x3_test])
+    print('point_by_point_predictions shape:',np.array(point_by_point_predictions_3).shape)  #(412L)
+    check_direction(point_by_point_predictions_3,y_test)
+    print('Training duration (s) : ', time.time() - global_start_time)
+
     
     #multiple_predictions = predict_sequences_multiple(model, X_test, seq_len, prediction_len=50)
     #print('multiple_predictions shape:',np.array(multiple_predictions).shape)   #(8L,50L)
