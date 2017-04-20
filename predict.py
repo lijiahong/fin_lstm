@@ -14,19 +14,23 @@ from keras.layers import Merge
 from keras.models import Sequential
 from keras.utils.np_utils import to_categorical
 import keras.backend as K
+from sklearn.metrics import roc_auc_score
+from keras import optimizers
 
 warnings.filterwarnings("ignore")
+
 
 def load_data(filename, seq_len, normalise_window):
     price_data = pd.read_csv(filename, index_col=0, header=0, sep=',', parse_dates=True)
     yy_data = list(price_data['open'])
 
+    row_split = 0.9
     open_data = list(price_data['open'])
     close_data = list(price_data['close'])
-    bt_data = list(price_data['bz'])
+    bt_data = list(price_data['bt'])
     vo_data = list(price_data['volume'])
 
-    x_datas = [open_data, close_data, bt_data]
+    x_datas = [open_data, close_data, bt_data, vo_data]
     sequence_length = seq_len + 1
     v_num = len(x_datas)
     x_trains = []
@@ -42,7 +46,7 @@ def load_data(filename, seq_len, normalise_window):
         if normalise_window:
             x_result = normalise_windows(x_result)
         x_result = np.array(x_result)        
-        row = round(0.9 * x_result.shape[0])
+        row = round(row_split * x_result.shape[0])
         
         x1_train = x_result[:row, :]
         x_trains.append(x1_train)
@@ -55,28 +59,37 @@ def load_data(filename, seq_len, normalise_window):
     for index in range(len(yy_data) - sequence_length + 1):
         y_result.append(1 if (yy_data[index + seq_len]-yy_data[index+seq_len-1]) > 0 else 0)
     print('result len:', len(y_result))
+    print('1:', y_result.count(1))
+    print('0:', y_result.count(0))
     print('result shape:', np.array(y_result).shape)
     
     y_result = np.array(y_result)
-    row = round(0.9 * y_result.shape[0])
+    row = round(row_split * y_result.shape[0])
     y_train = y_result[:row]
     x_trains.append(y_train)
+    
+    y_test = y_result[row:]
+    y_test = to_categorical(y_test)
     
     result = zip(*x_trains)
     np.random.shuffle(result)
     zip_res = zip(*result)
     all_train = []
     for i in range(len(zip_res)-1):
-        train = zip_res[i]
+        train = list(zip_res[i])
+        #train.extend(train)
+        #train.extend(train)
+        #train.extend(train)
         train = np.array(train) 
         x_train = np.reshape(train, (train.shape[0], train.shape[1], 1))
         all_train.append(x_train)
-    y_train = zip_res[-1]
+    y_train = list(zip_res[-1])
+    #y_train.extend(y_train)
+    #y_train.extend(y_train)
+    #y_train.extend(y_train)
     y_train = np.array(y_train)
     y_train = to_categorical(y_train)
 
-    y_test = y_result[row:]
-    y_test = to_categorical(y_test)
     
     return all_train, y_train, x_tests, y_test
 
@@ -101,10 +114,11 @@ def build_model(layers, input_nums):
         model.add(Merge(model_list, mode='concat'))
         
     model.add(Dense(layers[2],activation='relu'))
-    model.add(Dense(2,activation='softmax'))
+    model.add(Dense(layers[3],activation='softmax'))
     
     start = time.time()
-    model.compile(loss="categorical_crossentropy", optimizer="rmsprop",metrics=['categorical_accuracy'])
+    rmsprop = optimizers.RMSprop()
+    model.compile(loss="categorical_crossentropy", optimizer=rmsprop,metrics=['categorical_accuracy'])
     print("Compilation Time : ", time.time() - start)
     return model
 
@@ -144,12 +158,6 @@ def check_direction(predict,y_test):
     print('pos_pre, pos_rec', pos_pre, pos_rec)
     print('neg_pre, neg_rec', neg_pre, neg_rec)
     print('accuracy', accuracy)
-    model.add(Dense(layers[2],activation='relu'))
-    model.add(Dense(layers[3],activation='softmax'))
-
-    start = time.time()
-    model.compile(loss="categorical_crossentropy", optimizer="rmsprop",metrics=['categorical_accuracy'])
-    print("Compilation Time : ", time.time() - start)
     return model
 
 #直接全部预测
@@ -181,6 +189,11 @@ def predict_sequences_multiple(model, data, window_size, prediction_len):  #wind
             curr_frame = np.insert(curr_frame, [window_size-1], predicted[-1], axis=0)
         prediction_seqs.append(predicted)
     return prediction_seqs
+
+def test_auc(predict, y_test):
+    y_pred = [da[1] for da in predict]
+    y_true = [da[1] for da in y_test]
+    print('auc:',roc_auc_score(y_true, y_pred))
 
 def check_direction(predict,y_test):
     true_pos = false_pos = true_neg = false_neg = 0
@@ -221,7 +234,7 @@ def check_direction(predict,y_test):
 
 if __name__=='__main__':
     global_start_time = time.time()
-    epochs  = 15
+    epochs  = 30
     seq_len = 10
     batch = 64
 
@@ -255,9 +268,16 @@ if __name__=='__main__':
     
     model3 = build_model([1, 3*seq_len, 3*seq_len, 2], len(x_train))
     model3.fit(x_train,y_train,batch_size=batch,nb_epoch=epochs,validation_split=0.05)
+    print('training_set...')
+    point_by_point_predictions_3 = predict_point_by_point(model3, x_train)
+    print('point_by_point_predictions shape:',np.array(point_by_point_predictions_3).shape)  #(412L)
+    check_direction(point_by_point_predictions_3,y_train)
+    test_auc(point_by_point_predictions_3, y_train)
+    print('testing set...')
     point_by_point_predictions_3 = predict_point_by_point(model3, x_test)
     print('point_by_point_predictions shape:',np.array(point_by_point_predictions_3).shape)  #(412L)
     check_direction(point_by_point_predictions_3,y_test)
+    test_auc(point_by_point_predictions_3, y_test)
     print('Training duration (s) : ', time.time() - global_start_time)
     
     #multiple_predictions = predict_sequences_multiple(model, X_test, seq_len, prediction_len=50)
