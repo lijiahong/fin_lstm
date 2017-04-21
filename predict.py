@@ -7,6 +7,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import time
+from keras import regularizers
 from numpy import newaxis
 from keras.layers.core import Dense, Activation, Dropout
 from keras.layers.recurrent import LSTM
@@ -72,7 +73,7 @@ def load_data(filename, seq_len, normalise_window):
     y_test = to_categorical(y_test)
     
     result = zip(*x_trains)
-    np.random.shuffle(result)
+    #np.random.shuffle(result)
     zip_res = zip(*result)
     all_train = []
     for i in range(len(zip_res)-1):
@@ -105,7 +106,7 @@ def build_model(layers, input_nums):
     model_list = []
     for i in range(input_nums):
         model = Sequential()
-        model.add(LSTM(layers[1],return_sequences=False, input_shape=(seq_len, 1)))
+        model.add(LSTM(layers[1],W_regularizer=regularizers.l2(0.01), return_sequences=False, input_shape=(seq_len, 1)))
         model.add(Dropout(0.2))
         model_list.append(model)
 
@@ -113,11 +114,11 @@ def build_model(layers, input_nums):
         model = Sequential()
         model.add(Merge(model_list, mode='concat'))
         
-    model.add(Dense(layers[2],activation='relu'))
-    model.add(Dense(layers[3],activation='softmax'))
+    model.add(Dense(layers[2],W_regularizer=regularizers.l2(0.01), activation='relu'))
+    model.add(Dense(layers[3],W_regularizer=regularizers.l2(0.01), activation='softmax'))
     
     start = time.time()
-    rmsprop = optimizers.RMSprop()
+    rmsprop = optimizers.RMSprop(lr=0.02)
     model.compile(loss="categorical_crossentropy", optimizer=rmsprop,metrics=['categorical_accuracy'])
     print("Compilation Time : ", time.time() - start)
     return model
@@ -234,7 +235,7 @@ def check_direction(predict,y_test):
 
 if __name__=='__main__':
     global_start_time = time.time()
-    epochs  = 30
+    epochs  = 50
     seq_len = 10
     batch = 64
 
