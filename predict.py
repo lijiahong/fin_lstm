@@ -17,6 +17,7 @@ from keras.utils.np_utils import to_categorical
 import keras.backend as K
 from sklearn.metrics import roc_auc_score
 from keras import optimizers
+from sklearn import svm
 
 warnings.filterwarnings("ignore")
 
@@ -123,43 +124,6 @@ def build_model(layers, input_nums):
     print("Compilation Time : ", time.time() - start)
     return model
 
-def check_direction(predict,y_test):
-    true_pos = false_pos = true_neg = false_neg = 0
-    all_len = len(predict)
-    for i in range(all_len):
-        pre = np.argmax(predict[i])
-        real = np.argmax(y_test[i])
-        if pre == 1 and real == 1:
-            true_pos += 1
-        elif pre == 1 and real == 0:
-            false_pos += 1
-        elif pre == 0 and real == 0:
-            true_neg += 1
-        else:
-            false_neg += 1
-
-    print('true_pos, false_pos, true_neg, false_neg', true_pos, false_pos, true_neg, false_neg)
-    if (true_pos + false_pos > 0):
-        pos_pre = true_pos * 1.0 / (true_pos + false_pos)  
-    else:
-        pos_pre = 0
-    if (true_pos + false_neg > 0):
-        pos_rec = true_pos * 1.0 / (true_pos + false_neg)
-    else:
-        pos_rec = 0
-    if (true_neg + false_neg > 0):
-        neg_pre = true_neg * 1.0 / (true_neg + false_neg)
-    else:
-        neg_pre = 0
-    if (true_neg + false_pos > 0):
-        neg_rec = true_neg * 1.0 / (true_neg + false_pos)
-    else:
-        neg_rec = 0
-    accuracy = (true_pos + true_neg) * 1.0 / all_len
-    print('pos_pre, pos_rec', pos_pre, pos_rec)
-    print('neg_pre, neg_rec', neg_pre, neg_rec)
-    print('accuracy', accuracy)
-    return model
 
 #直接全部预测
 def predict_point_by_point(model, data):
@@ -193,7 +157,8 @@ def predict_sequences_multiple(model, data, window_size, prediction_len):  #wind
 
 def test_auc(predict, y_test):
     y_pred = [da[1] for da in predict]
-    y_true = [da[1] for da in y_test]
+    #y_true = [da[1] for da in y_test]
+    y_true = [np.argmax(da) for da in y_test]
     print('auc:',roc_auc_score(y_true, y_pred))
 
 def check_direction(predict,y_test):
@@ -233,6 +198,37 @@ def check_direction(predict,y_test):
     print('neg_pre, neg_rec', neg_pre, neg_rec)
     print('accuracy', accuracy)
 
+def make_svm(x_train, y_train, x_test, y_test):
+    all_train = zip(*x_train)
+    fix_x_train = []
+    fix_y_train = []
+    for i in range(len(all_train)):
+        data = all_train[i]
+        item = []
+        for da in data:
+            item.extend(da[:,0])
+        fix_x_train.append(item)
+        fix_y_train.append(np.argmax(y_train[i]))
+    
+    all_test = zip(*x_test)
+    fix_x_test = []
+    fix_y_test = []
+    for i in range(len(all_test)):
+        data = all_test[i]
+        item = []
+        for da in data:
+            item.extend(da[:,0])
+        fix_x_test.append(item)
+        fix_y_test.append(np.argmax(y_test[i]))
+
+    clf = svm.SVC()
+    clf.fit(fix_x_train, fix_y_train)
+    y_predict = clf.predict(fix_x_test)
+    y_pred = to_categorical(y_predict)
+    #print(y_predict, y_pred)
+    check_direction(y_pred, y_test)
+    test_auc(y_pred, y_test)
+
 if __name__=='__main__':
     global_start_time = time.time()
     epochs  = 50
@@ -250,7 +246,6 @@ if __name__=='__main__':
     print('y_test shape:',y_test.shape)    #(412L,)
     print('> Data Loaded. Compiling...')
    
-     
     ''' 
     model1 = build_model([1, seq_len, 2*seq_len, 1], 1)
     model1.fit(x1_train,y_train,batch_size=batch,nb_epoch=epochs,validation_split=0.05)
@@ -266,7 +261,6 @@ if __name__=='__main__':
     #print('point_by_point_predictions shape:',np.array(point_by_point_predictions_2).shape)  #(412L)
     #check_direction(point_by_point_predictions_2,y_test)
     #print('Training duration (s) : ', time.time() - global_start_time)
-    
     model3 = build_model([1, 3*seq_len, 3*seq_len, 2], len(x_train))
     model3.fit(x_train,y_train,batch_size=batch,nb_epoch=epochs,validation_split=0.05)
     print('training_set...')
@@ -280,10 +274,9 @@ if __name__=='__main__':
     check_direction(point_by_point_predictions_3,y_test)
     test_auc(point_by_point_predictions_3, y_test)
     print('Training duration (s) : ', time.time() - global_start_time)
-    
+    make_svm(x_train, y_train, x_test, y_test)
     #multiple_predictions = predict_sequences_multiple(model, X_test, seq_len, prediction_len=50)
     #print('multiple_predictions shape:',np.array(multiple_predictions).shape)   #(8L,50L)
     
     #full_predictions = predict_sequence_full(model, X_test, seq_len)
     #print('full_predictions shape:',np.array(full_predictions).shape)    #(412L,)
-
