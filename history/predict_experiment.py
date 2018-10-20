@@ -2,6 +2,7 @@
 
 from __future__ import print_function
 
+import keras
 import time
 import warnings
 import numpy as np
@@ -25,7 +26,7 @@ warnings.filterwarnings("ignore")
 
 def load_data(filename, seq_len, normalise_window):
     price_data = pd.read_csv(filename, index_col=0, header=0, sep=',', parse_dates=True)
-    yy_data = list(price_data['close'])
+    yy_data = list(price_data['open'])
 
     row_split = 0.9
     open_data = list(price_data['open'])
@@ -33,7 +34,7 @@ def load_data(filename, seq_len, normalise_window):
     bt_data = list(price_data['bt'])
     vo_data = list(price_data['volume'])
 
-    x_datas = [open_data, close_data, vo_data]
+    x_datas = [open_data, close_data, bt_data, vo_data]
     sequence_length = seq_len + 1
     v_num = len(x_datas)
     x_trains = []
@@ -76,7 +77,7 @@ def load_data(filename, seq_len, normalise_window):
     
     result = zip(*x_trains)
     #np.random.shuffle(result)
-    zip_res = zip(*result)
+    zip_res = list(zip(*result))
     all_train = []
     for i in range(len(zip_res)-1):
         train = list(zip_res[i])
@@ -106,21 +107,28 @@ def normalise_windows(window_data):
 
 def build_model(layers, input_nums):
     model_list = []
+    print(layers)
+    '''
     for i in range(input_nums):
         model = Sequential()
-        model.add(LSTM(layers[1],W_regularizer=regularizers.l2(0.01), return_sequences=False, input_shape=(seq_len, 1)))
+        model.add(LSTM(layers[1],W_regularizer=regularizers.l2(0.01), return_sequences=False, input_shape=(seq_len,1)))
         model.add(Dropout(0.2))
         model_list.append(model)
-
     if input_nums > 1:
         model = Sequential()
         model.add(Merge(model_list, mode='concat'))
+        #model.add(keras.layers.Add()(model_list))
         
+    '''
+    model = Sequential()
+    model.add(LSTM(layers[1],W_regularizer=regularizers.l2(0.01), return_sequences=False, input_shape=(seq_len,input_nums)))
+    model.add(Dropout(0.2))
+    
     model.add(Dense(layers[2],W_regularizer=regularizers.l2(0.01), activation='relu'))
     model.add(Dense(layers[3],W_regularizer=regularizers.l2(0.01), activation='softmax'))
     
     start = time.time()
-    rmsprop = optimizers.RMSprop(lr=0.02)
+    rmsprop = optimizers.RMSprop()
     model.compile(loss="categorical_crossentropy", optimizer=rmsprop,metrics=['categorical_accuracy'])
     print("Compilation Time : ", time.time() - start)
     return model
@@ -212,7 +220,7 @@ def check_direction(predict,y_test):
     
 
 def make_svm(x_train, y_train, x_test, y_test):
-    all_train = zip(*x_train)
+    all_train = list(zip(*x_train))
     fix_x_train = []
     fix_y_train = []
     for i in range(len(all_train)):
@@ -223,7 +231,7 @@ def make_svm(x_train, y_train, x_test, y_test):
         fix_x_train.append(item)
         fix_y_train.append(np.argmax(y_train[i]))
     
-    all_test = zip(*x_test)
+    all_test = list(zip(*x_test))
     fix_x_test = []
     fix_y_test = []
     for i in range(len(all_test)):
@@ -251,13 +259,13 @@ def write_result(items):
 
 if __name__=='__main__':
     global_start_time = time.time()
-    epochs  = 50
+    epochs  = 100
     seq_len = 10
-    batch = 64
+    batch = 32
 
     print('> Loading data... ')
 
-    x_train, y_train, x_test, y_test = load_data('sentiment/daywithprice.csv', seq_len, True)
+    x_train, y_train, x_test, y_test = load_data('../sentiment/daywithprice.csv', seq_len, True)
     for train_set in x_train:
         print('train_set shape:',train_set.shape)  #(3709L, 50L, 1L)
     print('y_train shape:',y_train.shape)  #(3709L,)
@@ -281,20 +289,36 @@ if __name__=='__main__':
     #print('point_by_point_predictions shape:',np.array(point_by_point_predictions_2).shape)  #(412L)
     #check_direction(point_by_point_predictions_2,y_test)
     #print('Training duration (s) : ', time.time() - global_start_time)
-    model3 = build_model([1, 3*seq_len, 3*seq_len, 2], len(x_train))
-    model3.fit(x_train,y_train,batch_size=batch,nb_epoch=epochs,validation_split=0.05)
+    '''
+    print(len(x_train))
+    test_train = np.zeros((x_train[0].shape[0],seq_len,len(x_train)))
+    #print(test_train)
+    for i in range(len(x_train)):
+        for j in range(len(x_train[i])):
+            #print(x_train[i][j,:,0])
+            test_train[j,:,i] = x_train[i][j,:,0]
+    #print(test_train)
+    
+    model3 = build_model([1, 1*seq_len, 3*seq_len, 2], len(x_train))
+    model3.fit(test_train,y_train,batch_size=batch,nb_epoch=epochs,validation_split=0.05)
     #print('training_set...')
     #point_by_point_predictions_3 = predict_point_by_point(model3, x_train)
     #print('point_by_point_predictions shape:',np.array(point_by_point_predictions_3).shape)  #(412L)
     #check_direction(point_by_point_predictions_3,y_train)
     #test_auc(point_by_point_predictions_3, y_train)
     print('testing set...')
-    point_by_point_predictions_3 = predict_point_by_point(model3, x_test)
+    test_test = np.zeros((x_test[0].shape[0],seq_len,len(x_test)))
+    for i in range(len(x_test)):
+        for j in range(len(x_test[i])):
+            #print(x_test[i][j,:,0])
+            test_test[j,:,i] = x_test[i][j,:,0]
+    #print(test_test)
+
+    point_by_point_predictions_3 = predict_point_by_point(model3, test_test)
     print('point_by_point_predictions shape:',np.array(point_by_point_predictions_3).shape)  #(412L)
     items_1 = check_direction(point_by_point_predictions_3,y_test)
     test_auc(point_by_point_predictions_3, y_test)
     print('Training duration (s) : ', time.time() - global_start_time)
-    '''
     items_2 = make_svm(x_train, y_train, x_test, y_test)
     #write_result([items_1, items_2])
     #multiple_predictions = predict_sequences_multiple(model, X_test, seq_len, prediction_len=50)
@@ -302,3 +326,4 @@ if __name__=='__main__':
     
     #full_predictions = predict_sequence_full(model, X_test, seq_len)
     #print('full_predictions shape:',np.array(full_predictions).shape)    #(412L,)
+    
